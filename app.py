@@ -1,9 +1,6 @@
 
 import streamlit as st
-import csv
-import io
 import math
-from datetime import datetime
 
 # ==========================================
 # 1. 기본 설정
@@ -15,175 +12,175 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🚲 시간대별·장소별 공유자전거 수요 분석")
-st.write(
-    "과거 대여 데이터를 바탕으로 시간대와 대여소별 평균 수요를 분석하고, "
-    "적정 자전거 배치량을 안내합니다."
+st.title("🚲 공유자전거 수요 분석 시스템")
+
+st.markdown(
+    """
+    시간대별·장소별 평균 대여 수요를 분석하여
+    대여소별 적정 자전거 배치량을 안내하는 시스템입니다.
+    """
 )
 
-st.divider()
+st.info(
+    "현재 데이터는 서비스 시연을 위해 구성한 가상 예시 데이터입니다. "
+    "실제 공공자전거 운영 통계와는 구분됩니다."
+)
 
 # ==========================================
-# 2. CSV 파일 읽기
+# 2. 내장 데이터
 # ==========================================
 
-def read_csv_file(uploaded_file):
-    content = uploaded_file.getvalue()
+stations = {
+    "강남역 1번 출구": {
+        "type": "출퇴근 중심형",
+        "bikes": 20,
+        "demand": [
+            1, 0, 0, 0, 1, 3, 12, 28,
+            19, 10, 8, 9, 11, 12, 10, 12,
+            16, 23, 31, 24, 14, 8, 5, 3
+        ]
+    },
 
-    encodings = ["utf-8-sig", "cp949"]
+    "잠실역 2번 출구": {
+        "type": "복합 생활형",
+        "bikes": 18,
+        "demand": [
+            1, 0, 0, 0, 0, 2, 8, 17,
+            14, 9, 8, 10, 13, 15, 14, 16,
+            20, 25, 28, 22, 14, 8, 4, 2
+        ]
+    },
 
-    for encoding in encodings:
-        try:
-            text = content.decode(encoding)
-            reader = csv.DictReader(io.StringIO(text))
-            return list(reader)
-        except UnicodeDecodeError:
-            continue
+    "여의나루역 1번 출구": {
+        "type": "여가·관광형",
+        "bikes": 25,
+        "demand": [
+            0, 0, 0, 0, 0, 1, 5, 13,
+            12, 16, 22, 28, 32, 35, 31, 28,
+            24, 20, 14, 8, 4, 2, 1, 0
+        ]
+    },
 
-    st.error("CSV 파일의 인코딩을 읽을 수 없습니다.")
-    st.stop()
+    "홍대입구역 3번 출구": {
+        "type": "상업·유동인구형",
+        "bikes": 22,
+        "demand": [
+            1, 0, 0, 0, 1, 2, 7, 14,
+            18, 16, 17, 19, 21, 22, 24, 25,
+            27, 30, 33, 29, 22, 15, 8, 3
+        ]
+    },
+
+    "시청역 5번 출구": {
+        "type": "업무지구형",
+        "bikes": 16,
+        "demand": [
+            0, 0, 0, 0, 0, 1, 9, 22,
+            18, 9, 7, 8, 9, 8, 7, 9,
+            15, 24, 29, 18, 9, 4, 2, 1
+        ]
+    }
+}
 
 
 # ==========================================
-# 3. 데이터 업로드
+# 3. 수요 분석 함수
 # ==========================================
 
-st.subheader("📂 분석 데이터 업로드")
+def analyze_demand(station, hour, safety_rate):
 
-col1, col2 = st.columns(2)
+    station_data = stations[station]
 
-with col1:
-    rental_file = st.file_uploader(
-        "대여 기록 CSV",
-        type=["csv"],
-        key="rental"
+    average_demand = station_data["demand"][hour]
+    current_bikes = station_data["bikes"]
+
+    target_bikes = math.ceil(
+        average_demand * safety_rate
     )
 
-with col2:
-    stock_file = st.file_uploader(
-        "대여소별 자전거 보유량 CSV",
-        type=["csv"],
-        key="stock"
-    )
+    difference = target_bikes - current_bikes
 
-if rental_file is None or stock_file is None:
-    st.info("대여 기록과 자전거 보유량 CSV 파일을 모두 업로드해 주세요.")
+    return {
+        "average": average_demand,
+        "current": current_bikes,
+        "target": target_bikes,
+        "difference": difference
+    }
 
-    st.markdown("**① 대여 기록 CSV 예시**")
-    st.code(
-        "대여일시,대여소명\n"
-        "2026-01-01 08:15,강남역 1번 출구\n"
-        "2026-01-01 08:30,강남역 1번 출구\n"
-        "2026-01-01 09:10,시청역 2번 출구\n"
-        "2026-01-02 08:20,강남역 1번 출구",
-        language="csv"
-    )
-
-    st.markdown("**② 자전거 보유량 CSV 예시**")
-    st.code(
-        "대여소명,잔여자전거\n"
-        "강남역 1번 출구,12\n"
-        "시청역 2번 출구,8",
-        language="csv"
-    )
-
-    st.stop()
-
-
-rental_data = read_csv_file(rental_file)
-stock_data = read_csv_file(stock_file)
 
 # ==========================================
-# 4. 데이터 전처리
+# 4. 배치 가이드 함수
 # ==========================================
 
-required_rental = ["대여일시", "대여소명"]
-required_stock = ["대여소명", "잔여자전거"]
+def make_guide(result):
 
-if not rental_data or not stock_data:
-    st.error("업로드한 CSV 파일에 데이터가 없습니다.")
-    st.stop()
+    difference = result["difference"]
+    demand = result["average"]
 
-if not all(key in rental_data[0] for key in required_rental):
-    st.error("대여 기록 CSV에 '대여일시', '대여소명' 열이 필요합니다.")
-    st.stop()
-
-if not all(key in stock_data[0] for key in required_stock):
-    st.error("보유량 CSV에 '대여소명', '잔여자전거' 열이 필요합니다.")
-    st.stop()
-
-clean_rentals = []
-
-for row in rental_data:
-    try:
-        rental_time = datetime.fromisoformat(
-            row["대여일시"].strip()
+    if demand == 0:
+        return (
+            "수요 없음",
+            "해당 시간대의 예상 대여 수요가 없습니다.",
+            "info"
         )
 
-        station = row["대여소명"].strip()
+    elif difference >= 3:
+        return (
+            "자전거 추가 배치 권장",
+            f"현재보다 자전거 {difference}대를 추가 배치하는 것이 권장됩니다.",
+            "error"
+        )
 
-        if not station:
-            continue
+    elif difference > 0:
+        return (
+            "소량 추가 배치 권장",
+            f"자전거 {difference}대를 추가 배치하는 것이 권장됩니다.",
+            "warning"
+        )
 
-        clean_rentals.append({
-            "날짜": rental_time.date(),
-            "시간": rental_time.hour,
-            "대여소명": station
-        })
+    elif difference <= -3:
+        return (
+            "자전거 감축 및 재배치 권장",
+            f"자전거 {-difference}대를 다른 대여소로 이동하는 것이 권장됩니다.",
+            "info"
+        )
 
-    except (ValueError, AttributeError, TypeError):
-        continue
+    else:
+        return (
+            "현재 배치 유지",
+            "현재 자전거 보유량이 적정 수준입니다.",
+            "success"
+        )
 
-if not clean_rentals:
-    st.error("유효한 대여 기록을 찾을 수 없습니다.")
-    st.stop()
-
-# 보유량 데이터 정리
-stock_dict = {}
-
-for row in stock_data:
-    try:
-        station = row["대여소명"].strip()
-        count = int(float(row["잔여자전거"]))
-
-        if station and count >= 0:
-            stock_dict[station] = stock_dict.get(station, 0) + count
-
-    except (ValueError, AttributeError, TypeError):
-        continue
-
-if not stock_dict:
-    st.error("유효한 자전거 보유량 데이터가 없습니다.")
-    st.stop()
 
 # ==========================================
 # 5. 분석 조건 선택
 # ==========================================
 
-st.sidebar.header("🔎 분석 조건")
-
-hours = []
-
-for hour in range(24):
-    hours.append(f"{hour:02d}시")
-
-selected_hour = st.sidebar.selectbox(
-    "분석할 시간대",
-    hours
-)
-
-hour_number = int(selected_hour[:2])
-
-available_stations = []
-
-for station in stock_dict:
-    available_stations.append(station)
-
-available_stations.sort()
+st.sidebar.header("🔎 분석 조건 설정")
 
 selected_station = st.sidebar.selectbox(
-    "분석할 대여소",
-    available_stations
+    "대여소 선택",
+    list(stations.keys())
+)
+
+selected_hour = st.sidebar.selectbox(
+    "분석 시간대 선택",
+    list(range(24)),
+    format_func=lambda hour: (
+        f"{hour:02d}:00 ~ {(hour + 1) % 24:02d}:00"
+    )
+)
+
+st.sidebar.divider()
+
+st.sidebar.subheader("현재 자전거 보유량")
+
+current_bikes = stations[selected_station]["bikes"]
+
+st.sidebar.metric(
+    "내장된 자전거 보유량",
+    f"{current_bikes}대"
 )
 
 safety_rate = st.sidebar.slider(
@@ -194,239 +191,204 @@ safety_rate = st.sidebar.slider(
     step=0.1
 )
 
-# ==========================================
-# 6. 시간대별·장소별 수요 분석
-# ==========================================
-
-def analyze_demand(data, stock, hour, station, rate):
-
-    # 전체 데이터의 관측 날짜 수집
-    all_dates = set()
-
-    for row in data:
-        all_dates.add(row["날짜"])
-
-    all_dates = sorted(all_dates)
-
-    # 선택한 대여소와 시간대의 대여 기록 집계
-    daily_counts = {}
-
-    for date in all_dates:
-        daily_counts[date] = 0
-
-    for row in data:
-        if (
-            row["시간"] == hour
-            and row["대여소명"] == station
-        ):
-            daily_counts[row["날짜"]] += 1
-
-    # 관측 기간 동안의 평균 대여량
-    total_rentals = 0
-
-    for count in daily_counts.values():
-        total_rentals += count
-
-    average_demand = total_rentals / len(all_dates)
-
-    # 현재 보유 자전거 수
-    current_bikes = stock[station]
-
-    # 적정 배치량 계산
-    target_bikes = math.ceil(
-        average_demand * rate
-    )
-
-    difference = target_bikes - current_bikes
-
-    return {
-        "average": average_demand,
-        "current": current_bikes,
-        "target": target_bikes,
-        "difference": difference,
-        "days": len(all_dates),
-        "daily": daily_counts
-    }
-
 
 # ==========================================
-# 7. 자전거 배치 가이드
-# ==========================================
-
-def make_guide(result):
-
-    difference = result["difference"]
-    average = result["average"]
-
-    if average == 0:
-        return (
-            "⚪ 해당 시간대의 과거 대여 기록이 없습니다.",
-            "분석 기간 내 대여 수요가 확인되지 않았습니다."
-        )
-
-    elif difference >= 3:
-        return (
-            "🔴 자전거 추가 배치 권장",
-            f"현재보다 자전거 {difference}대를 추가하는 것이 권장됩니다."
-        )
-
-    elif difference > 0:
-        return (
-            "🟠 소량 추가 배치 권장",
-            f"자전거 {difference}대를 추가하는 것이 권장됩니다."
-        )
-
-    elif difference <= -3:
-        return (
-            "🔵 자전거 재배치 검토",
-            f"현재보다 자전거 {-difference}대를 줄이는 것이 권장됩니다."
-        )
-
-    else:
-        return (
-            "🟢 현재 배치 유지",
-            "현재 자전거 보유량이 분석상 적정 수준입니다."
-        )
-
-
-# ==========================================
-# 8. 분석 실행
+# 6. 분석 실행
 # ==========================================
 
 result = analyze_demand(
-    clean_rentals,
-    stock_dict,
-    hour_number,
     selected_station,
+    selected_hour,
     safety_rate
 )
 
-guide_title, guide_description = make_guide(result)
+guide_title, guide_description, guide_type = make_guide(result)
+
 
 # ==========================================
-# 9. 분석 결과 출력
+# 7. 선택 조건 표시
 # ==========================================
 
 st.divider()
 
-st.subheader("📊 분석 결과")
-
-st.markdown(
-    f"**선택 조건:** {selected_station} / {selected_hour}"
-)
+st.subheader("📍 분석 대상")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric(
-        "평균 시간당 대여 수요",
-        f"{result['average']:.2f}대"
-    )
+    st.write("**선택 대여소**")
+    st.write(selected_station)
 
 with col2:
+    st.write("**대여소 유형**")
+    st.write(stations[selected_station]["type"])
+
+with col3:
+    st.write("**분석 시간대**")
+    st.write(
+        f"{selected_hour:02d}:00 ~ "
+        f"{(selected_hour + 1) % 24:02d}:00"
+    )
+
+
+# ==========================================
+# 8. 주요 분석 결과
+# ==========================================
+
+st.divider()
+
+st.subheader("📊 수요 분석 결과")
+
+metric1, metric2, metric3 = st.columns(3)
+
+with metric1:
+    st.metric(
+        "평균 예상 대여 수요",
+        f"{result['average']}대"
+    )
+
+with metric2:
     st.metric(
         "현재 자전거 보유량",
         f"{result['current']}대"
     )
 
-with col3:
+with metric3:
     st.metric(
         "권장 자전거 배치량",
         f"{result['target']}대",
         delta=f"{result['difference']:+d}대"
     )
 
-# ==========================================
-# 10. 자전거 수요 및 보유량 그래프
-# ==========================================
-
-st.subheader("📈 수요량과 보유량 비교")
-
-chart_data = {
-    "평균 대여 수요": result["average"],
-    "현재 보유량": result["current"],
-    "권장 배치량": result["target"]
-}
-
-st.bar_chart(chart_data)
 
 # ==========================================
-# 11. 배치 가이드 출력
+# 9. 배치 가이드 출력
 # ==========================================
 
-st.subheader("🚲 자전거 재배치 가이드")
+st.divider()
 
-if result["difference"] >= 3:
+st.subheader("🚲 자전거 배치 가이드")
+
+if guide_type == "error":
     st.error(guide_title)
-elif result["difference"] > 0:
+elif guide_type == "warning":
     st.warning(guide_title)
-elif result["difference"] <= -3:
-    st.info(guide_title)
-else:
+elif guide_type == "success":
     st.success(guide_title)
+else:
+    st.info(guide_title)
 
 st.write(guide_description)
 
 st.caption(
-    f"분석 기간: {result['days']}일 | "
     f"수요 대비 여유 배치 비율: {safety_rate:.1f}"
 )
 
+
 # ==========================================
-# 12. 날짜별 대여량 확인
+# 10. 선택 대여소의 시간대별 수요
 # ==========================================
 
 st.divider()
-st.subheader("📅 날짜별 대여 기록")
 
-daily_chart = {}
+st.subheader("📈 시간대별 평균 수요 분석")
 
-for date, count in result["daily"].items():
-    daily_chart[str(date)] = count
+hourly_demand = stations[selected_station]["demand"]
 
-st.bar_chart(daily_chart)
+hour_labels = [
+    f"{hour:02d}시"
+    for hour in range(24)
+]
+
+hourly_chart = {
+    "평균 대여 수요": hourly_demand
+}
+
+st.bar_chart(hourly_chart)
+
+st.caption(
+    "선택한 대여소의 0시부터 23시까지 시간대별 평균 대여 수요입니다."
+)
+
 
 # ==========================================
-# 13. 상세 분석 데이터 출력 및 다운로드
+# 11. 동일 시간대 대여소별 수요 비교
 # ==========================================
 
-st.subheader("📋 상세 분석 데이터")
+st.divider()
 
-detail_rows = []
+st.subheader("📍 대여소별 수요 비교")
 
-for date, count in result["daily"].items():
-    detail_rows.append({
-        "날짜": str(date),
-        "대여소명": selected_station,
-        "시간대": selected_hour,
-        "대여량": count
+comparison_data = {}
+
+for station in stations:
+
+    comparison_data[station] = (
+        stations[station]["demand"][selected_hour]
+    )
+
+st.bar_chart(comparison_data)
+
+st.caption(
+    f"{selected_hour:02d}시 기준 대여소별 평균 수요 비교"
+)
+
+
+# ==========================================
+# 12. 전체 시간대 상세 데이터
+# ==========================================
+
+st.divider()
+
+st.subheader("📋 시간대별 상세 데이터")
+
+detail_data = []
+
+for hour in range(24):
+
+    detail_data.append({
+        "시간대": f"{hour:02d}:00",
+        "평균 예상 대여량": hourly_demand[hour],
+        "현재 보유량": current_bikes,
+        "권장 배치량": math.ceil(
+            hourly_demand[hour] * safety_rate
+        )
     })
 
 st.dataframe(
-    detail_rows,
+    detail_data,
     use_container_width=True,
     hide_index=True
 )
 
-# CSV 다운로드
-output = io.StringIO()
 
-writer = csv.DictWriter(
-    output,
-    fieldnames=["날짜", "대여소명", "시간대", "대여량"]
-)
+# ==========================================
+# 13. 시스템 안내
+# ==========================================
 
-writer.writeheader()
-writer.writerows(detail_rows)
+st.divider()
 
-st.download_button(
-    label="📥 분석 결과 CSV 다운로드",
-    data=output.getvalue().encode("utf-8-sig"),
-    file_name="공유자전거_수요분석결과.csv",
-    mime="text/csv"
+st.subheader("ℹ️ 분석 시스템 안내")
+
+st.markdown(
+    """
+    **데이터 구성**
+    - 대여소별 시간대 평균 대여 수요
+    - 대여소별 현재 자전거 보유량
+    - 대여소 유형별 수요 패턴
+
+    **분석 방식**
+    - 선택한 시간대의 평균 수요량 확인
+    - 현재 보유량과 권장 배치량 비교
+    - 수요량에 따라 자전거 추가·감축·유지 판단
+
+    **데이터 관련 유의사항**
+    - 현재 데이터는 시연을 위한 가상 데이터입니다.
+    - 실시간 자전거 위치나 실제 재고를 반영하지 않습니다.
+    - 실제 운영에 적용하려면 공공자전거 실측 데이터로 교체해야 합니다.
+    """
 )
 
 st.caption(
-    "※ 본 분석은 업로드된 과거 대여 기록의 날짜별 평균을 활용한 "
-    "기초 수요 분석이며, 실시간 수요나 미래 수요를 예측하지 않습니다."
+    "공유자전거 시간대별·장소별 수요 분석 시스템"
 )
